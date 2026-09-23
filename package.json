@@ -1,0 +1,40 @@
+{
+  "name": "studio-booking",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "build:shared": "tsc -p shared/tsconfig.json",
+    "predev": "npm run build:shared",
+    "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch --env-file-if-exists=.env server/src/index.ts",
+    "dev:client": "vite --config client/vite.config.ts",
+    "prebuild": "npm run build:shared",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc -p server/tsconfig.json",
+    "build:client": "vite build --config client/vite.config.ts",
+    "pretypecheck": "npm run build:shared",
+    "typecheck": "tsc -p server/tsconfig.test.json && tsc -p client/tsconfig.json",
+    "pretest": "npm run build:shared",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:create": "tsx --env-file-if-exists=.env server/src/scripts/createDatabases.ts",
+    "migrate": "node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m server/migrations -j sql --envPath .env",
+    "migrate:up": "npm run migrate -- up",
+    "migrate:down": "npm run migrate -- down",
+    "migrate:create": "npm run migrate -- create",
+    "preseed:admin": "npm run build:shared",
+    "seed:admin": "tsx --env-file-if-exists=.env server/src/seed/admin.ts"
+  }
+}

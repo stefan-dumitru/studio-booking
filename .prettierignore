@@ -1,0 +1,11 @@
+node_modules/
+dist/
+shared/dist/
+client/dist/
+coverage/
+
+# Documentation is hand-formatted and reviewed as prose. Prettier reflows
+# tables and rewrites emphasis markers, which produces noisy diffs on files
+# whose wording matters more than their whitespace.
+*.md
+specifications/

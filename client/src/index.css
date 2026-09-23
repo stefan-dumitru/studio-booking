@@ -1,0 +1,9 @@
+@import 'tailwindcss';
+
+/*
+ * Dark mode is driven by a `dark` class on <html> rather than the media query
+ * alone, because ui-guidelines.md specifies a manual toggle over the OS
+ * preference. The toggle itself arrives in Phase 6; this variant is defined now
+ * so components written before then use the right convention.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
