@@ -30,7 +30,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:create": "tsx --env-file-if-exists=.env server/src/scripts/createDatabases.ts",
-    "migrate": "node node_modules/node-pg-migrate/bin/node-pg-migrate.js -m server/migrations -j sql --envPath .env",
+    "migrate": "node --env-file-if-exists=.env node_modules/node-pg-migrate/bin/node-pg-migrate.js -m server/migrations -j sql",
     "migrate:up": "npm run migrate -- up",
     "migrate:down": "npm run migrate -- down",
     "migrate:create": "npm run migrate -- create",
