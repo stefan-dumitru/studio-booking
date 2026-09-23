@@ -12,6 +12,8 @@ const validEnv = {
   PORT: '3000',
   STUDIO_TIME_ZONE: 'Europe/Bucharest',
   BCRYPT_COST: '12',
+  SESSION_SECRET: 'a-test-session-secret',
+  APP_BASE_URL: 'http://localhost:5173',
 } satisfies NodeJS.ProcessEnv;
 
 describe('loadConfig', () => {
@@ -23,16 +25,61 @@ describe('loadConfig', () => {
     expect(config.nodeEnv).toBe('test');
     expect(config.bcryptCost).toBe(12);
     expect(config.studioTimeZone).toBe('Europe/Bucharest');
+    expect(config.sessionSecret).toBe(validEnv.SESSION_SECRET);
+    expect(config.appBaseUrl).toBe(validEnv.APP_BASE_URL);
   });
 
   it('applies documented defaults for the optional values', () => {
-    const config = loadConfig({ DATABASE_URL: validEnv.DATABASE_URL });
+    const config = loadConfig({
+      DATABASE_URL: validEnv.DATABASE_URL,
+      SESSION_SECRET: validEnv.SESSION_SECRET,
+      APP_BASE_URL: validEnv.APP_BASE_URL,
+    });
 
     expect(config.port).toBe(3000);
     expect(config.nodeEnv).toBe('development');
     expect(config.logLevel).toBe('info');
     expect(config.bcryptCost).toBe(12);
     expect(config.studioTimeZone).toBe('Europe/Bucharest');
+    expect(config.smtpUrl).toBe('');
+    expect(config.mailFrom).toBe('studio@localhost');
+    expect(config.sessionTtlDays).toBe(7);
+    expect(config.verifyTokenTtlHours).toBe(24);
+    expect(config.resetTokenTtlHours).toBe(1);
+  });
+
+  it('rejects a missing SESSION_SECRET', () => {
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: validEnv.DATABASE_URL,
+        APP_BASE_URL: validEnv.APP_BASE_URL,
+      }),
+    ).toThrow(/SESSION_SECRET: is required/);
+  });
+
+  it('rejects a malformed APP_BASE_URL', () => {
+    expect(() => loadConfig({ ...validEnv, APP_BASE_URL: 'not a url' })).toThrow(
+      /APP_BASE_URL: is not a valid URL/,
+    );
+  });
+
+  it('strips a trailing slash from APP_BASE_URL so links never double up', () => {
+    const config = loadConfig({
+      ...validEnv,
+      APP_BASE_URL: 'http://localhost:5173/',
+    });
+    expect(config.appBaseUrl).toBe('http://localhost:5173');
+  });
+
+  it('accepts an empty SMTP_URL as "use the dev mailer"', () => {
+    const config = loadConfig({ ...validEnv, SMTP_URL: '' });
+    expect(config.smtpUrl).toBe('');
+  });
+
+  it('rejects a malformed SMTP_URL', () => {
+    expect(() => loadConfig({ ...validEnv, SMTP_URL: 'not a url' })).toThrow(
+      /SMTP_URL: is not a valid URL/,
+    );
   });
 
   it('rejects a missing DATABASE_URL', () => {

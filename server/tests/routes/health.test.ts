@@ -3,6 +3,11 @@ import request from 'supertest';
 import { Pool } from 'pg';
 import { createApp } from '../../src/app.js';
 import { createTestPool } from '../helpers/testDb.js';
+import { createTestConfig } from '../helpers/testConfig.js';
+import { createFakeMailer } from '../helpers/fakeMailer.js';
+
+const config = createTestConfig();
+const mailer = createFakeMailer();
 
 /**
  * The health endpoint's whole point is the unhappy path: it must report the
@@ -25,14 +30,18 @@ describe('GET /api/health', () => {
     });
 
     it('returns 200 and reports the database as ok', async () => {
-      const response = await request(createApp({ pool })).get('/api/health');
+      const response = await request(createApp({ pool, config, mailer })).get(
+        '/api/health',
+      );
 
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ status: 'ok', db: 'ok' });
     });
 
     it('leaks no version, hostname or environment detail', async () => {
-      const response = await request(createApp({ pool })).get('/api/health');
+      const response = await request(createApp({ pool, config, mailer })).get(
+        '/api/health',
+      );
 
       expect(Object.keys(response.body).sort()).toEqual(['db', 'status']);
       expect(response.headers['x-powered-by']).toBeUndefined();
@@ -58,18 +67,18 @@ describe('GET /api/health', () => {
     });
 
     it('returns 503 and reports the database as unreachable', async () => {
-      const response = await request(createApp({ pool: brokenPool })).get(
-        '/api/health',
-      );
+      const response = await request(
+        createApp({ pool: brokenPool, config, mailer }),
+      ).get('/api/health');
 
       expect(response.status).toBe(503);
       expect(response.body).toEqual({ status: 'degraded', db: 'unreachable' });
     });
 
     it('does not leak the connection error into the response', async () => {
-      const response = await request(createApp({ pool: brokenPool })).get(
-        '/api/health',
-      );
+      const response = await request(
+        createApp({ pool: brokenPool, config, mailer }),
+      ).get('/api/health');
 
       expect(JSON.stringify(response.body)).not.toMatch(
         /127\.0\.0\.1|ECONNREFUSED|nobody/,

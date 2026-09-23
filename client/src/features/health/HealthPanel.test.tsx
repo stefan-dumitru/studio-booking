@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
-import { App } from './App.js';
+import { HealthPanel } from './HealthPanel.js';
 
 /**
- * Covers what the component promises: it reports ok, it reports a degraded
- * database distinctly from an unreachable API, and it never renders a raw error.
+ * Migrated from Phase 0's App.test.tsx unchanged -- covers what the component
+ * promises: it reports ok, it reports a degraded database distinctly from an
+ * unreachable API, and it never renders a raw error.
  */
 
 function mockFetch(implementation: () => Promise<Response>): void {
@@ -23,11 +24,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('App health panel', () => {
+describe('HealthPanel', () => {
   it('reports ok when the API says the database is reachable', async () => {
     mockFetch(async () => jsonResponse(200, { status: 'ok', db: 'ok' }));
 
-    render(<App />);
+    render(<HealthPanel />);
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(/^OK —/);
@@ -39,7 +40,7 @@ describe('App health panel', () => {
       jsonResponse(503, { status: 'degraded', db: 'unreachable' }),
     );
 
-    render(<App />);
+    render(<HealthPanel />);
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -53,7 +54,7 @@ describe('App health panel', () => {
       throw new TypeError('Failed to fetch');
     });
 
-    render(<App />);
+    render(<HealthPanel />);
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -65,7 +66,7 @@ describe('App health panel', () => {
   it('shows a loading state before the check resolves', () => {
     mockFetch(() => new Promise<Response>(() => {}));
 
-    render(<App />);
+    render(<HealthPanel />);
 
     expect(screen.getByRole('status')).toHaveTextContent('Checking…');
   });

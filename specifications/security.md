@@ -42,7 +42,10 @@ This section covers how it's implemented and how it fails.
     that user and **destroys all of that user's sessions**, so a stolen session doesn't survive the
     recovery it triggered.
   - **Token storage:** only a SHA-256 hash of each token is stored; the raw value exists solely in
-    the email. Token lifetimes per purpose: `[TODO]` — undecided, needed before Phase 1.
+    the email. **Token lifetimes:** verification link 24 hours, reset link 1 hour — the reset link
+    is shorter because it grants account takeover if intercepted, and there are no reminder emails,
+    so the verification link needs to survive someone checking their inbox late. Configurable via
+    `VERIFY_TOKEN_TTL_HOURS` / `RESET_TOKEN_TTL_HOURS`, defaults as above.
 - Session handling — JWT or server session, cookie flags, expiry and refresh policy: **Server-side
   sessions** in Postgres via `express-session` + `connect-pg-simple`. Chosen specifically because
   deactivating a member must lock them out _immediately_, which a stateless JWT can't do without
@@ -52,21 +55,32 @@ This section covers how it's implemented and how it fails.
     environment.
   - The session id is **regenerated on login** (`req.session.regenerate`) to close session fixation,
     and the session is destroyed server-side on logout — not merely cleared client-side.
-  - Expiry / idle timeout: `[TODO]` — no duration decided. Needed before Phase 1; a rolling
-    expiry refreshed on activity is the likely shape, but the number is yours.
-  - Because sessions are cookie-borne, **CSRF protection is required** on every state-changing
-    request: a double-submit token issued at login, checked by middleware on all non-GET routes.
-    `sameSite: 'lax'` alone is defence in depth, not the control.
+  - **Expiry / idle timeout: 7 days, rolling** (refreshed on activity via `rolling: true`).
+    Configurable via `SESSION_TTL_DAYS`.
+  - Because sessions are cookie-borne, **CSRF protection is required** on every mutating
+    authenticated request. Implemented as a **synchronizer token returned via response body, echoed
+    via header** rather than a literal double-submit cookie: a random token is generated at login
+    (and at the verify-email auto-login), stored server-side in the session, and returned once in
+    the JSON response for the client to hold in memory and send back as `X-CSRF-Token` on every
+    non-GET request. This gives the same guarantee as double-submit (a cross-site request can't read
+    the JSON response or set a custom header) without a second JS-readable cookie or a
+    `cookie-parser` dependency. `sameSite: 'lax'` alone is defence in depth, not the control.
 - MFA required: **No.** Out of scope for launch, recorded as an accepted risk. The admin account is
   the one that would most justify it.
 - If the identity comes from an external provider: Not applicable. Failure modes for _this app's_
   own login, since they're the equivalent case that otherwise gets forgotten:
-  - **Wrong password, unknown email, unverified account, and deactivated account all return the same
-    generic failure** ("Email or password is incorrect, or the account isn't active") with the same
-    response time characteristics. A distinct "this account is deactivated" message is a membership
-    oracle.
-  - The one exception is a _logged-in_ pending member: once authenticated they're told plainly that
-    their email needs verifying, because at that point they've already proven who they are.
+  - **Wrong password, unknown email, and a deactivated account all return the same generic failure**
+    ("Email or password is incorrect, or the account isn't active") with the same response time
+    characteristics. A distinct "this account is deactivated" message is a membership oracle.
+  - **A `pending_verification` account is deliberately not in that list — login succeeds for it.**
+    Correct credentials create a session exactly as they would for an active account; only
+    `requireVerified` (not `requireAuth`) blocks business routes afterward, and the client redirects
+    a pending session to a "please verify your email" screen with a resend option. Rejecting login
+    for a correctly-typed password would tell a legitimate member their password is wrong when the
+    real issue is an unclicked email link — actively misleading, and the reason this reads
+    differently from an earlier draft of this section that lumped "unverified" in with the generic
+    failure case above. Once authenticated, a pending member is told plainly that their email needs
+    verifying, because at that point they've already proven who they are.
   - A session whose user has since been deactivated or deleted is rejected and destroyed on the next
     request — the auth middleware re-reads `users.status` from the database on **every** request
     rather than trusting what was true at login. It fails **closed**.

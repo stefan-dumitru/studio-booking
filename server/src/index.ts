@@ -1,10 +1,21 @@
 import { loadConfig } from './config.js';
 import { createPool } from './db/pool.js';
+import { createMailer } from './mail/mailer.js';
 import { createApp } from './app.js';
 
 const config = loadConfig();
 const pool = createPool({ connectionString: config.databaseUrl });
-const app = createApp({ pool });
+const mailer = createMailer(config);
+const app = createApp({ pool, config, mailer });
+
+if (!config.smtpUrl) {
+  console.log(
+    JSON.stringify({
+      level: 'info',
+      msg: 'SMTP_URL not set -- using the dev console mailer, emails are logged, not sent',
+    }),
+  );
+}
 
 const server = app.listen(config.port, () => {
   console.log(

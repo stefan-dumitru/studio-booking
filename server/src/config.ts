@@ -5,10 +5,11 @@
  * failing on the first request that happens to need it
  * (specifications/operations.md > Environments & Configuration).
  *
- * Validation is hand-written rather than pulled from a library: this is the
- * only place in Phase 0 that needs it, and it is short enough to read. When
- * request-body validation arrives in Phase 1 a library is worth discussing --
- * that is a decision to make deliberately, not to acquire by accident here.
+ * Validation is hand-written rather than pulled from a library: it is short
+ * enough to read, and the same pattern is reused for the small request bodies
+ * in server/src/routes/auth.ts. Admin resource CRUD in Phase 2 has richer
+ * bodies -- that is the point to reconsider a schema library like zod, not
+ * here.
  */
 
 export type NodeEnv = 'development' | 'test' | 'production';
@@ -20,6 +21,15 @@ export interface Config {
   readonly databaseUrl: string;
   readonly studioTimeZone: string;
   readonly bcryptCost: number;
+  readonly sessionSecret: string;
+  /** Never derived from the Host header -- see security.md > Environments. */
+  readonly appBaseUrl: string;
+  /** Empty means "use the dev console mailer" -- see server/src/mail/mailer.ts. */
+  readonly smtpUrl: string;
+  readonly mailFrom: string;
+  readonly sessionTtlDays: number;
+  readonly verifyTokenTtlHours: number;
+  readonly resetTokenTtlHours: number;
 }
 
 /** Collects every problem before throwing, so one run reports all of them. */
@@ -113,6 +123,31 @@ function parseTimeZone(env: NodeJS.ProcessEnv, errors: ConfigErrors): string {
   return raw;
 }
 
+function parseAppBaseUrl(env: NodeJS.ProcessEnv, errors: ConfigErrors): string {
+  const raw = requireString(env, 'APP_BASE_URL', errors);
+  if (!raw) return raw;
+
+  try {
+    new URL(raw);
+  } catch {
+    errors.add('APP_BASE_URL', `is not a valid URL: ${JSON.stringify(raw)}`);
+  }
+  // A trailing slash would double up when a path is appended (".../verify-email").
+  return raw.replace(/\/+$/, '');
+}
+
+function parseSmtpUrl(env: NodeJS.ProcessEnv, errors: ConfigErrors): string {
+  const raw = env['SMTP_URL']?.trim() ?? '';
+  if (!raw) return raw;
+
+  try {
+    new URL(raw);
+  } catch {
+    errors.add('SMTP_URL', `is not a valid URL: ${JSON.stringify(raw)}`);
+  }
+  return raw;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const errors = new ConfigErrors();
 
@@ -123,6 +158,31 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     databaseUrl: requireString(env, 'DATABASE_URL', errors),
     studioTimeZone: parseTimeZone(env, errors),
     bcryptCost: requireInteger(env, 'BCRYPT_COST', 12, { min: 4, max: 15 }, errors),
+    sessionSecret: requireString(env, 'SESSION_SECRET', errors),
+    appBaseUrl: parseAppBaseUrl(env, errors),
+    smtpUrl: parseSmtpUrl(env, errors),
+    mailFrom: optionalString(env, 'MAIL_FROM', 'studio@localhost'),
+    sessionTtlDays: requireInteger(
+      env,
+      'SESSION_TTL_DAYS',
+      7,
+      { min: 1, max: 90 },
+      errors,
+    ),
+    verifyTokenTtlHours: requireInteger(
+      env,
+      'VERIFY_TOKEN_TTL_HOURS',
+      24,
+      { min: 1, max: 24 * 14 },
+      errors,
+    ),
+    resetTokenTtlHours: requireInteger(
+      env,
+      'RESET_TOKEN_TTL_HOURS',
+      1,
+      { min: 1, max: 24 },
+      errors,
+    ),
   };
 
   errors.throwIfAny();
