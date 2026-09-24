@@ -64,6 +64,12 @@ export function BrowsePage(): React.JSX.Element {
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold">Studio Booking</h1>
           <div className="flex items-center gap-2">
+            <Link
+              to="/bookings"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+            >
+              My bookings
+            </Link>
             {/* Not rendered for a member -- ui-guidelines.md > Information
                 Architecture. The server enforces this independently either way. */}
             {state.status === 'authenticated' && state.user.role === 'admin' && (

@@ -1,5 +1,5 @@
 import { apiFetch } from '../../lib/apiClient.js';
-import type { Booking } from './types.js';
+import type { Booking, BookingScope, MyBooking, PagedResult } from './types.js';
 
 export interface CreateBookingInput {
   readonly resourceId: string;
@@ -16,4 +16,26 @@ export function createBooking(
     body: JSON.stringify(input),
     csrfToken,
   });
+}
+
+export interface ListMyBookingsParams {
+  readonly scope: BookingScope;
+  readonly page: number;
+}
+
+export function listMyBookings(
+  params: ListMyBookingsParams,
+): Promise<PagedResult<MyBooking>> {
+  const search = new URLSearchParams({
+    scope: params.scope,
+    page: String(params.page),
+  });
+  return apiFetch(`/bookings/mine?${search.toString()}`, { method: 'GET' });
+}
+
+export function cancelBooking(
+  id: string,
+  csrfToken: string,
+): Promise<{ booking: Booking }> {
+  return apiFetch(`/bookings/${id}`, { method: 'DELETE', csrfToken });
 }

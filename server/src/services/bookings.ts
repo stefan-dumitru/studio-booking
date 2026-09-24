@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import {
   BOOKING_HORIZON_DAYS,
+  CANCEL_CUTOFF_HOURS,
   MAX_ACTIVE_BOOKINGS,
   MIN_NOTICE_MINUTES,
   SLOT_MINUTES,
@@ -12,10 +13,15 @@ import { lockResourceForBookingCheck } from '../db/queries/resources.js';
 import { lockUserForBookingCheck } from '../db/queries/users.js';
 import {
   countActiveBookingsForMember,
+  deleteBookingSlotsForBooking,
   findAlreadyTakenSlots,
   insertBooking,
   insertBookingSlots,
+  listBookingsForMember,
+  lockBookingForCancel,
+  markBookingCancelled,
 } from '../db/queries/bookings.js';
+import type { BookingScope } from '../db/queries/bookings.js';
 import { localDateStringInZone } from './timeUtil.js';
 import { toBookingDto } from '../db/types.js';
 import type { BookingDto } from '../db/types.js';
@@ -194,4 +200,103 @@ export async function createBooking(
 function isUniqueViolationOnBookingSlots(error: unknown): boolean {
   const pgError = error as { code?: string; constraint?: string };
   return pgError?.code === '23505' && pgError?.constraint === 'booking_slots_pkey';
+}
+
+export interface MyBookingDto extends BookingDto {
+  readonly resourceName: string;
+}
+
+export interface ListMyBookingsInput {
+  readonly memberId: string;
+  readonly scope: BookingScope;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export interface ListMyBookingsResult {
+  readonly items: readonly MyBookingDto[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export async function listMyBookings(
+  deps: BookingDeps,
+  input: ListMyBookingsInput,
+): Promise<ListMyBookingsResult> {
+  const { rows, total } = await listBookingsForMember(deps.pool, {
+    memberId: input.memberId,
+    scope: input.scope,
+    limit: input.pageSize,
+    offset: (input.page - 1) * input.pageSize,
+  });
+  return {
+    items: rows.map((row) => ({ ...toBookingDto(row), resourceName: row.resourceName })),
+    total,
+    page: input.page,
+    pageSize: input.pageSize,
+  };
+}
+
+export class BookingNotFoundError extends AppError {
+  constructor() {
+    super(404, 'BOOKING_NOT_FOUND', 'That booking does not exist.');
+  }
+}
+
+export class CancelForbiddenError extends AppError {
+  constructor() {
+    super(403, 'CANCEL_FORBIDDEN', 'You can only cancel your own bookings.');
+  }
+}
+
+export class CancelWindowClosedError extends AppError {
+  constructor() {
+    super(
+      403,
+      'CANCEL_WINDOW_CLOSED',
+      `Bookings can only be cancelled at least ${CANCEL_CUTOFF_HOURS} hours before they start.`,
+    );
+  }
+}
+
+export interface CancelOwnBookingInput {
+  readonly bookingId: string;
+  readonly memberId: string;
+}
+
+/**
+ * Member-scoped cancellation only -- an admin cancelling any booking, with
+ * no cutoff and an audit write, is Phase 5's shape on this same operation,
+ * not built here (functional.md > Cancel a booking).
+ */
+export async function cancelOwnBooking(
+  deps: BookingDeps,
+  input: CancelOwnBookingInput,
+): Promise<BookingDto> {
+  const row = await withTransaction(deps.pool, async (client) => {
+    const booking = await lockBookingForCancel(client, input.bookingId);
+    if (!booking) throw new BookingNotFoundError();
+    // 403, not 404 -- the booking exists, this member just isn't allowed to
+    // touch it (functional.md > Phase 4: a named test, not an incidental
+    // choice).
+    if (booking.memberId !== input.memberId) throw new CancelForbiddenError();
+
+    // Idempotent no-op: a double-clicked cancel, or a retried request,
+    // returns the same 200 rather than erroring (operations.md > "the
+    // booking id is the idempotency key").
+    if (booking.status === 'cancelled') return booking;
+
+    const cutoff = new Date(
+      booking.startsAt.getTime() - CANCEL_CUTOFF_HOURS * 60 * 60 * 1000,
+    );
+    if (new Date() >= cutoff) throw new CancelWindowClosedError();
+
+    const cancelled = await markBookingCancelled(client, input.bookingId, input.memberId);
+    // The statement that actually frees the slot.
+    await deleteBookingSlotsForBooking(client, input.bookingId);
+    return cancelled;
+  });
+
+  return toBookingDto(row);
 }

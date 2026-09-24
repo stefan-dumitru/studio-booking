@@ -469,3 +469,250 @@ describe('POST /api/bookings', () => {
     });
   });
 });
+
+describe('GET /api/bookings/mine', () => {
+  let pool: Pool;
+  let app: Express;
+  let mailer: FakeMailer;
+  let admin: AdminSession;
+
+  beforeAll(() => {
+    pool = createTestPool();
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  beforeEach(async () => {
+    await truncateAll(pool);
+    ({ app, mailer } = buildTestApp(pool));
+    admin = await loginAsAdmin(app, pool, mailer, 'admin@example.com');
+  });
+
+  async function bookableResourceFixture(): Promise<{ resourceId: string }> {
+    const { resourceId } = await createResourceFixture(admin, {
+      openTime: '00:00',
+      closeTime: '23:30',
+    });
+    return { resourceId };
+  }
+
+  it('rejects an unauthenticated request', async () => {
+    const response = await request(app).get('/api/bookings/mine');
+    expect(response.status).toBe(401);
+  });
+
+  it('splits bookings between upcoming and past, includes the resource name, and never leaks another member', async () => {
+    const { resourceId } = await bookableResourceFixture();
+    const member = await loginAsMember(app, pool, mailer, 'mine@example.com');
+    const otherMember = await loginAsMember(app, pool, mailer, 'notmine@example.com');
+
+    const upcomingStart = nextSlotBoundary(
+      new Date(Date.now() + 150 * 60 * 1000),
+    ).toISOString();
+    const upcomingEnd = new Date(
+      new Date(upcomingStart).getTime() + 30 * 60 * 1000,
+    ).toISOString();
+    const created = await member.agent
+      .post('/api/bookings')
+      .set('X-CSRF-Token', member.csrfToken)
+      .send({ resourceId, startsAt: upcomingStart, endsAt: upcomingEnd });
+    expect(created.status).toBe(201);
+
+    // A past booking the current API can't produce -- inserted directly,
+    // same pattern dbHelpers.ts already uses elsewhere.
+    const pastStart = nextSlotBoundary(new Date(Date.now() - 3 * 60 * 60 * 1000));
+    const pastEnd = new Date(pastStart.getTime() + 30 * 60 * 1000);
+    await pool.query(
+      `INSERT INTO bookings (resource_id, member_id, starts_at, ends_at)
+       VALUES ($1, $2, $3, $4)`,
+      [resourceId, member.userId, pastStart, pastEnd],
+    );
+
+    // A booking belonging to someone else entirely -- must never appear in
+    // either of this member's lists.
+    const otherStart = nextSlotBoundary(
+      new Date(Date.now() + 200 * 60 * 1000),
+    ).toISOString();
+    const otherEnd = new Date(
+      new Date(otherStart).getTime() + 30 * 60 * 1000,
+    ).toISOString();
+    const otherCreated = await otherMember.agent
+      .post('/api/bookings')
+      .set('X-CSRF-Token', otherMember.csrfToken)
+      .send({ resourceId, startsAt: otherStart, endsAt: otherEnd });
+    expect(otherCreated.status).toBe(201);
+
+    const upcoming = await member.agent.get('/api/bookings/mine?scope=upcoming');
+    expect(upcoming.status).toBe(200);
+    expect(upcoming.body.items).toHaveLength(1);
+    expect(upcoming.body.items[0].id).toBe(created.body.booking.id);
+    expect(upcoming.body.items[0].resourceName).toEqual(expect.any(String));
+    expect(
+      upcoming.body.items.some((item: { id: string }) => item.id === otherCreated.body.booking.id),
+    ).toBe(false);
+
+    const past = await member.agent.get('/api/bookings/mine?scope=past');
+    expect(past.status).toBe(200);
+    expect(past.body.items).toHaveLength(1);
+    expect(past.body.items[0].startsAt).toBe(pastStart.toISOString());
+  });
+});
+
+describe('DELETE /api/bookings/:id', () => {
+  let pool: Pool;
+  let app: Express;
+  let mailer: FakeMailer;
+  let admin: AdminSession;
+
+  beforeAll(() => {
+    pool = createTestPool();
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  beforeEach(async () => {
+    await truncateAll(pool);
+    ({ app, mailer } = buildTestApp(pool));
+    admin = await loginAsAdmin(app, pool, mailer, 'admin@example.com');
+  });
+
+  async function bookableResourceFixture(): Promise<{ resourceId: string }> {
+    const { resourceId } = await createResourceFixture(admin, {
+      openTime: '00:00',
+      closeTime: '23:30',
+    });
+    return { resourceId };
+  }
+
+  /** Well clear of both the 30-minute minimum notice and the 2-hour cancel
+   * cutoff, so a booking made from this slot starts cancellable. */
+  function cancellableSlot(): { startsAt: string; endsAt: string } {
+    const startsAt = nextSlotBoundary(
+      new Date(Date.now() + 150 * 60 * 1000),
+    ).toISOString();
+    const endsAt = new Date(new Date(startsAt).getTime() + 30 * 60 * 1000).toISOString();
+    return { startsAt, endsAt };
+  }
+
+  /** Clears the 30-minute minimum notice but sits well inside the 2-hour
+   * cancel cutoff -- a booking made from this slot cannot be self-cancelled. */
+  function withinCutoffSlot(): { startsAt: string; endsAt: string } {
+    const startsAt = nextSlotBoundary(
+      new Date(Date.now() + 50 * 60 * 1000),
+    ).toISOString();
+    const endsAt = new Date(new Date(startsAt).getTime() + 30 * 60 * 1000).toISOString();
+    return { startsAt, endsAt };
+  }
+
+  it('rejects an unauthenticated request', async () => {
+    const response = await request(app).delete('/api/bookings/999999999');
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 404 for a booking that does not exist', async () => {
+    const member = await loginAsMember(app, pool, mailer, 'ghost@example.com');
+    const response = await member.agent
+      .delete('/api/bookings/999999999')
+      .set('X-CSRF-Token', member.csrfToken);
+    expect(response.status).toBe(404);
+    expect(response.body.code).toBe('BOOKING_NOT_FOUND');
+  });
+
+  it('succeeds well outside the 2-hour cutoff and frees the slot', async () => {
+    const { resourceId } = await bookableResourceFixture();
+    const member = await loginAsMember(app, pool, mailer, 'canceller@example.com');
+    const { startsAt, endsAt } = cancellableSlot();
+
+    const created = await member.agent
+      .post('/api/bookings')
+      .set('X-CSRF-Token', member.csrfToken)
+      .send({ resourceId, startsAt, endsAt });
+    expect(created.status).toBe(201);
+    const bookingId = created.body.booking.id;
+
+    const cancelled = await member.agent
+      .delete(`/api/bookings/${bookingId}`)
+      .set('X-CSRF-Token', member.csrfToken);
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.booking.status).toBe('cancelled');
+
+    const slotRows = await pool.query(
+      'SELECT count(*)::int AS count FROM booking_slots WHERE booking_id = $1',
+      [bookingId],
+    );
+    expect(slotRows.rows[0].count).toBe(0);
+
+    // The freed slot is genuinely bookable again, not just absent from
+    // booking_slots -- a different member can take it.
+    const otherMember = await loginAsMember(app, pool, mailer, 'rebooker@example.com');
+    const rebooked = await otherMember.agent
+      .post('/api/bookings')
+      .set('X-CSRF-Token', otherMember.csrfToken)
+      .send({ resourceId, startsAt, endsAt });
+    expect(rebooked.status).toBe(201);
+  });
+
+  it('rejects cancellation inside the 2-hour cutoff', async () => {
+    const { resourceId } = await bookableResourceFixture();
+    const member = await loginAsMember(app, pool, mailer, 'toolate@example.com');
+    const { startsAt, endsAt } = withinCutoffSlot();
+
+    const created = await member.agent
+      .post('/api/bookings')
+      .set('X-CSRF-Token', member.csrfToken)
+      .send({ resourceId, startsAt, endsAt });
+    expect(created.status).toBe(201);
+
+    const response = await member.agent
+      .delete(`/api/bookings/${created.body.booking.id}`)
+      .set('X-CSRF-Token', member.csrfToken);
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('CANCEL_WINDOW_CLOSED');
+  });
+
+  it('treats cancelling an already-cancelled booking as a 200 no-op', async () => {
+    const { resourceId } = await bookableResourceFixture();
+    const member = await loginAsMember(app, pool, mailer, 'doubleclick@example.com');
+    const { startsAt, endsAt } = cancellableSlot();
+
+    const created = await member.agent
+      .post('/api/bookings')
+      .set('X-CSRF-Token', member.csrfToken)
+      .send({ resourceId, startsAt, endsAt });
+    const bookingId = created.body.booking.id;
+
+    const first = await member.agent
+      .delete(`/api/bookings/${bookingId}`)
+      .set('X-CSRF-Token', member.csrfToken);
+    expect(first.status).toBe(200);
+
+    const second = await member.agent
+      .delete(`/api/bookings/${bookingId}`)
+      .set('X-CSRF-Token', member.csrfToken);
+    expect(second.status).toBe(200);
+    expect(second.body.booking.status).toBe('cancelled');
+  });
+
+  it("rejects cancelling another member's booking with 403, not 404", async () => {
+    const { resourceId } = await bookableResourceFixture();
+    const memberA = await loginAsMember(app, pool, mailer, 'owner@example.com');
+    const memberB = await loginAsMember(app, pool, mailer, 'intruder@example.com');
+    const { startsAt, endsAt } = cancellableSlot();
+
+    const created = await memberA.agent
+      .post('/api/bookings')
+      .set('X-CSRF-Token', memberA.csrfToken)
+      .send({ resourceId, startsAt, endsAt });
+    expect(created.status).toBe(201);
+
+    const response = await memberB.agent
+      .delete(`/api/bookings/${created.body.booking.id}`)
+      .set('X-CSRF-Token', memberB.csrfToken);
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('CANCEL_FORBIDDEN');
+  });
+});

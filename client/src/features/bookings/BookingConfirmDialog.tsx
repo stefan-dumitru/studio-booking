@@ -52,6 +52,7 @@ export function BookingConfirmDialog({
     onSuccess: () => {
       showToast('Booked.');
       void queryClient.invalidateQueries({ queryKey: ['availability'] });
+      void queryClient.invalidateQueries({ queryKey: ['bookings', 'mine'] });
       onBooked();
     },
     onError: () => {

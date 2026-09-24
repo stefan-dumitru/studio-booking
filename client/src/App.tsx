@@ -10,6 +10,7 @@ import { VerifyEmailPage } from './features/auth/pages/VerifyEmailPage.js';
 import { ForgotPasswordPage } from './features/auth/pages/ForgotPasswordPage.js';
 import { ResetPasswordPage } from './features/auth/pages/ResetPasswordPage.js';
 import { BrowsePage } from './features/availability/BrowsePage.js';
+import { MyBookingsPage } from './features/bookings/MyBookingsPage.js';
 import { AdminLayout } from './features/admin/AdminLayout.js';
 import { ResourceTypesPage } from './features/admin-resource-types/ResourceTypesPage.js';
 import { ResourcesPage } from './features/admin-resources/ResourcesPage.js';
@@ -40,6 +41,7 @@ export function App(): React.JSX.Element {
 
               <Route element={<RequireAuth />}>
                 <Route path="/" element={<BrowsePage />} />
+                <Route path="/bookings" element={<MyBookingsPage />} />
               </Route>
 
               <Route element={<RequireAdmin />}>
