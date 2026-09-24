@@ -100,3 +100,21 @@ export async function updatePasswordHash(
     passwordHash,
   ]);
 }
+
+/**
+ * Locks the member's own row for the duration of the caller's transaction --
+ * serialises a single member's concurrent booking attempts against their own
+ * 3-active-bookings cap without affecting anyone else's
+ * (operations.md > Concurrency & Write Correctness, race #4).
+ */
+export async function lockUserForBookingCheck(
+  db: Queryable,
+  userId: string,
+): Promise<UserRow | null> {
+  const result = await db.query<RawUserRow>(
+    'SELECT * FROM users WHERE id = $1 FOR UPDATE',
+    [userId],
+  );
+  const row = result.rows[0];
+  return row ? mapRow(row) : null;
+}

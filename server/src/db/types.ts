@@ -131,3 +131,37 @@ export interface ConflictingBookingDto {
   readonly endsAt: string;
   readonly memberDisplayName: string;
 }
+
+export type BookingStatus = 'booked' | 'cancelled';
+
+export interface BookingRow {
+  readonly id: string;
+  readonly resourceId: string;
+  readonly memberId: string;
+  readonly startsAt: Date;
+  readonly endsAt: Date;
+  readonly status: BookingStatus;
+  readonly cancelledAt: Date | null;
+  readonly cancelledBy: string | null;
+  readonly createdAt: Date;
+}
+
+/** Never includes another member's identity -- there is none on this row to
+ * begin with, since a booking's own member is always its owner. */
+export interface BookingDto {
+  readonly id: string;
+  readonly resourceId: string;
+  readonly startsAt: string;
+  readonly endsAt: string;
+  readonly status: BookingStatus;
+}
+
+export function toBookingDto(row: BookingRow): BookingDto {
+  return {
+    id: row.id,
+    resourceId: row.resourceId,
+    startsAt: row.startsAt.toISOString(),
+    endsAt: row.endsAt.toISOString(),
+    status: row.status,
+  };
+}

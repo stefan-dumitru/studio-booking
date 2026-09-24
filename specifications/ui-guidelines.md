@@ -26,11 +26,17 @@ in that feature's Plan Mode session, informed by this file — not spec'd upfron
     phone layout of the day grid needs real attention in Phase 3 rather than being left to fall out
     of the desktop CSS.
 - Exact breakpoints and the layout change at each:
-  - **< 640px (Tailwind `sm` and below)** — single column. The day grid drops its `resources × slots`
-    matrix and becomes one collapsible section per resource, each listing its slots vertically.
-    Navigation collapses behind a hamburger. Filters live in a bottom sheet.
-  - **640–1023px (`sm`–`lg`)** — the grid returns as a matrix with a sticky first column (resource
-    names) and horizontal scrolling for the time axis. Navigation is a top bar.
+  - **< 640px (Tailwind `sm` and below)** — **trim, decided in Phase 3, not the original design**:
+    rather than a separate stacked-list component, the grid stays a `resources × slots` matrix at
+    every width below desktop, horizontally-scrollable with a sticky first column (resource names).
+    Building a genuinely separate collapsible-list layout would have roughly doubled Phase 3's grid
+    surface (component and test code both) for a phase already carrying the availability endpoint,
+    booking creation, and the concurrency guarantee. The matrix stays keyboard-complete and usable at
+    this width; it is simply denser than a purpose-built mobile list would be. Revisit if real usage
+    shows this is actually a problem, not preemptively. Navigation still collapses behind a hamburger;
+    filters still live in a bottom sheet.
+  - **640–1023px (`sm`–`lg`)** — the same matrix with a sticky first column (resource names) and
+    horizontal scrolling for the time axis, as originally specified. Navigation is a top bar.
   - **≥ 1024px (`lg` and up)** — full grid, no horizontal scroll at the default time window, filters
     in a persistent left rail, admin screens get a fixed sidebar.
   - With 50 resources the grid is tall at every breakpoint. Rows are **paginated at 25 resources per

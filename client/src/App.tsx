@@ -9,7 +9,7 @@ import { LoginPage } from './features/auth/pages/LoginPage.js';
 import { VerifyEmailPage } from './features/auth/pages/VerifyEmailPage.js';
 import { ForgotPasswordPage } from './features/auth/pages/ForgotPasswordPage.js';
 import { ResetPasswordPage } from './features/auth/pages/ResetPasswordPage.js';
-import { HomePage } from './features/home/HomePage.js';
+import { BrowsePage } from './features/availability/BrowsePage.js';
 import { AdminLayout } from './features/admin/AdminLayout.js';
 import { ResourceTypesPage } from './features/admin-resource-types/ResourceTypesPage.js';
 import { ResourcesPage } from './features/admin-resources/ResourcesPage.js';
@@ -39,7 +39,7 @@ export function App(): React.JSX.Element {
               <Route path="/reset-password" element={<ResetPasswordPage />} />
 
               <Route element={<RequireAuth />}>
-                <Route path="/" element={<HomePage />} />
+                <Route path="/" element={<BrowsePage />} />
               </Route>
 
               <Route element={<RequireAdmin />}>

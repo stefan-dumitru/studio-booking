@@ -6,6 +6,9 @@ import type { Mailer } from './mail/mailer.js';
 import { createHealthRouter } from './routes/health.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createAdminRouter } from './routes/admin.js';
+import { createResourceTypesRouter } from './routes/resourceTypes.js';
+import { createAvailabilityRouter } from './routes/availability.js';
+import { createBookingsRouter } from './routes/bookings.js';
 import { createSessionMiddleware } from './middleware/session.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -43,6 +46,9 @@ export function createApp({ pool, config, mailer }: AppDependencies): Express {
   // The entire admin surface sits behind requireAdmin in one place, so a new
   // admin route can't ship unguarded (security.md > Authorization).
   app.use('/api/admin', ...auth.requireAdmin, createAdminRouter({ pool, config }));
+  app.use('/api/resource-types', ...auth.requireVerified, createResourceTypesRouter(pool));
+  app.use('/api/availability', ...auth.requireVerified, createAvailabilityRouter({ pool, config }));
+  app.use('/api/bookings', ...auth.requireVerified, createBookingsRouter({ pool, config }));
 
   // Must be last: it only catches errors from routes registered before it.
   app.use(errorHandler);

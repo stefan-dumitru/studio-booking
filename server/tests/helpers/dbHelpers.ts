@@ -61,10 +61,15 @@ export interface BookingFixtureInput {
 }
 
 /**
- * Inserts a booking directly, bypassing the (not-yet-built, Phase 3) booking
- * API -- this is how the archive-block and stranded-bookings tests reach a
- * state the current API can't produce on its own, same pattern as
- * bookingSlots.test.ts uses for the schema-level tests.
+ * Inserts a booking directly, bypassing the booking API -- this is how the
+ * archive-block and stranded-bookings tests reach a state the current API
+ * can't produce on its own, same pattern as bookingSlots.test.ts uses for
+ * the schema-level tests.
+ *
+ * Also inserts the matching booking_slots rows -- a live booking always has
+ * one per 30-minute slot (data-model.md > booking_slots), and tests that
+ * rely on the PRIMARY KEY conflict (archive races, double-booking checks)
+ * need those rows to actually exist, not just the parent booking.
  */
 export async function insertBookingFixture(
   pool: Pool,
@@ -79,6 +84,21 @@ export async function insertBookingFixture(
   if (!id) {
     throw new Error('insertBookingFixture: INSERT ... RETURNING produced no row');
   }
+
+  const slotStarts: Date[] = [];
+  for (
+    let slot = new Date(input.startsAt);
+    slot < new Date(input.endsAt);
+    slot = new Date(slot.getTime() + 30 * 60 * 1000)
+  ) {
+    slotStarts.push(slot);
+  }
+  await pool.query(
+    `INSERT INTO booking_slots (resource_id, booking_id, slot_start)
+     SELECT $1, $2, unnest($3::timestamptz[])`,
+    [input.resourceId, id, slotStarts],
+  );
+
   return id;
 }
 
