@@ -187,6 +187,14 @@ export async function unarchiveResourceRow(
   await db.query('UPDATE resources SET archived_at = NULL WHERE id = $1', [id]);
 }
 
+/** For the admin summary -- how many resources are currently archived. */
+export async function countArchivedResources(db: Queryable): Promise<number> {
+  const result = await db.query<{ count: string }>(
+    `SELECT count(*) AS count FROM resources WHERE archived_at IS NOT NULL`,
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
 /** The archive-block check: future, still-booked bookings on this resource. */
 export async function countFutureActiveBookings(
   db: Queryable,

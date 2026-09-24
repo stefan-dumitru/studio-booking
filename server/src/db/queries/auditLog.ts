@@ -19,13 +19,17 @@ export type AuditAction =
   | 'resource.create'
   | 'resource.update'
   | 'resource.archive'
-  | 'resource.unarchive';
+  | 'resource.unarchive'
+  | 'admin.booking.cancel'
+  | 'admin.member.deactivate'
+  | 'admin.member.reactivate'
+  | 'admin.member.role_change';
 
 export interface AuditLogInput {
   readonly actorId?: string | null;
   readonly actorEmailAttempted?: string | null;
   readonly action: AuditAction;
-  readonly targetType?: 'user' | 'resource' | 'resource_type' | '';
+  readonly targetType?: 'user' | 'resource' | 'resource_type' | 'booking' | '';
   readonly targetId?: string | null;
   readonly detail?: Record<string, unknown>;
   readonly ip?: string | null;

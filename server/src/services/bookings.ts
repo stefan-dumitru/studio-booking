@@ -11,20 +11,22 @@ import { AppError } from '../errors.js';
 import { withTransaction } from '../db/withTransaction.js';
 import { lockResourceForBookingCheck } from '../db/queries/resources.js';
 import { lockUserForBookingCheck } from '../db/queries/users.js';
+import { recordAuditEvent } from '../db/queries/auditLog.js';
 import {
   countActiveBookingsForMember,
   deleteBookingSlotsForBooking,
   findAlreadyTakenSlots,
   insertBooking,
   insertBookingSlots,
+  listBookingsForAdmin,
   listBookingsForMember,
   lockBookingForCancel,
   markBookingCancelled,
 } from '../db/queries/bookings.js';
-import type { BookingScope } from '../db/queries/bookings.js';
+import type { AdminBookingStatusFilter, BookingScope } from '../db/queries/bookings.js';
 import { localDateStringInZone } from './timeUtil.js';
-import { toBookingDto } from '../db/types.js';
-import type { BookingDto } from '../db/types.js';
+import { toAdminBookingDto, toBookingDto } from '../db/types.js';
+import type { AdminBookingDto, BookingDto } from '../db/types.js';
 
 export interface BookingDeps {
   readonly pool: Pool;
@@ -266,9 +268,10 @@ export interface CancelOwnBookingInput {
 }
 
 /**
- * Member-scoped cancellation only -- an admin cancelling any booking, with
- * no cutoff and an audit write, is Phase 5's shape on this same operation,
- * not built here (functional.md > Cancel a booking).
+ * Member-scoped cancellation: ownership-checked, cutoff-enforced, never
+ * audited (a member acting on their own booking is deliberately excluded --
+ * security.md > Audit / Logging). cancelBookingAsAdmin below is the other
+ * shape of this same operation -- any booking, no cutoff, always audited.
  */
 export async function cancelOwnBooking(
   deps: BookingDeps,
@@ -299,4 +302,80 @@ export async function cancelOwnBooking(
   });
 
   return toBookingDto(row);
+}
+
+export interface CancelBookingAsAdminInput {
+  readonly bookingId: string;
+  readonly actorId: string;
+}
+
+/**
+ * The admin shape of cancellation: any booking, no ownership check, no
+ * cutoff (functional.md > Cancel a booking: "This check does not apply to
+ * admins"). Always audited on the state-changing path -- the idempotent
+ * already-cancelled no-op writes nothing, since there is no action to
+ * record (security.md > Audit / Logging: written in the same transaction
+ * as the action it describes).
+ */
+export async function cancelBookingAsAdmin(
+  deps: BookingDeps,
+  input: CancelBookingAsAdminInput,
+): Promise<BookingDto> {
+  const row = await withTransaction(deps.pool, async (client) => {
+    const booking = await lockBookingForCancel(client, input.bookingId);
+    if (!booking) throw new BookingNotFoundError();
+    if (booking.status === 'cancelled') return booking;
+
+    const cancelled = await markBookingCancelled(client, input.bookingId, input.actorId);
+    await deleteBookingSlotsForBooking(client, input.bookingId);
+    await recordAuditEvent(client, {
+      action: 'admin.booking.cancel',
+      actorId: input.actorId,
+      targetType: 'booking',
+      targetId: input.bookingId,
+      detail: { memberId: booking.memberId },
+    });
+    return cancelled;
+  });
+
+  return toBookingDto(row);
+}
+
+export interface ListAllBookingsInput {
+  readonly q: string;
+  readonly resourceId: string | null;
+  readonly status: AdminBookingStatusFilter;
+  readonly dateFrom: string | null;
+  readonly dateTo: string | null;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export interface ListAllBookingsResult {
+  readonly items: readonly AdminBookingDto[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+export async function listAllBookings(
+  deps: BookingDeps,
+  input: ListAllBookingsInput,
+): Promise<ListAllBookingsResult> {
+  const { rows, total } = await listBookingsForAdmin(deps.pool, {
+    q: input.q,
+    resourceId: input.resourceId,
+    status: input.status,
+    dateFrom: input.dateFrom,
+    dateTo: input.dateTo,
+    studioTimeZone: deps.config.studioTimeZone,
+    limit: input.pageSize,
+    offset: (input.page - 1) * input.pageSize,
+  });
+  return {
+    items: rows.map(toAdminBookingDto),
+    total,
+    page: input.page,
+    pageSize: input.pageSize,
+  };
 }

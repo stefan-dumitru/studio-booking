@@ -118,3 +118,120 @@ export async function lockUserForBookingCheck(
   const row = result.rows[0];
   return row ? mapRow(row) : null;
 }
+
+/**
+ * Locks every currently-active admin row for the duration of the caller's
+ * transaction -- the check both deactivation and role-change demotion run
+ * before deciding whether they'd drop the count to zero
+ * (data-model.md > users: "at least one active admin must exist at all
+ * times"; operations.md > Concurrency, race #5). Two concurrent requests
+ * against this same set serialise: the second sees whatever the first just
+ * committed, not a stale count.
+ */
+export async function lockActiveAdmins(db: Queryable): Promise<readonly string[]> {
+  // ORDER BY id gives every transaction the same lock-acquisition order --
+  // without it, two concurrent callers could each grab a different row
+  // first and deadlock waiting on each other's, instead of one cleanly
+  // blocking behind the other (the same reasoning `data-model.md` and
+  // `operations.md`'s race #5 assume implicitly).
+  const result = await db.query<{ id: string }>(
+    `SELECT id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY id FOR UPDATE`,
+  );
+  return result.rows.map((row) => row.id);
+}
+
+export async function setUserStatus(
+  db: Queryable,
+  id: string,
+  status: UserStatus,
+): Promise<UserRow> {
+  const result = await db.query<RawUserRow>(
+    `UPDATE users SET status = $2, deactivated_at = CASE WHEN $2 = 'deactivated' THEN now() ELSE NULL END
+      WHERE id = $1
+      RETURNING *`,
+    [id, status],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error(`setUserStatus: no user with id ${id}`);
+  return mapRow(row);
+}
+
+export async function setUserRole(
+  db: Queryable,
+  id: string,
+  role: UserRole,
+): Promise<UserRow> {
+  const result = await db.query<RawUserRow>(
+    `UPDATE users SET role = $2 WHERE id = $1 RETURNING *`,
+    [id, role],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error(`setUserRole: no user with id ${id}`);
+  return mapRow(row);
+}
+
+export async function countPendingVerificationMembers(db: Queryable): Promise<number> {
+  const result = await db.query<{ count: string }>(
+    `SELECT count(*) AS count FROM users WHERE status = 'pending_verification'`,
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
+export type AdminMemberStatusFilter = 'active' | 'pending_verification' | 'deactivated' | 'all';
+
+export interface ListUsersForAdminOptions {
+  readonly q: string;
+  readonly status: AdminMemberStatusFilter;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+export interface ListUsersForAdminResult {
+  readonly rows: readonly UserRow[];
+  readonly total: number;
+}
+
+/** The admin member list -- functional.md > Search & Reporting: "free-text
+ * on display_name and email, plus a filter on account status." Same
+ * dynamic-WHERE-builder pattern as resources.ts's listResources. */
+export async function listUsersForAdmin(
+  db: Queryable,
+  options: ListUsersForAdminOptions,
+): Promise<ListUsersForAdminResult> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options.q.trim()) {
+    params.push(`%${options.q.trim()}%`);
+    conditions.push(`(display_name ILIKE $${params.length} OR email ILIKE $${params.length})`);
+  }
+  if (options.status !== 'all') {
+    params.push(options.status);
+    conditions.push(`status = $${params.length}`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  params.push(options.limit);
+  const limitParam = `$${params.length}`;
+  params.push(options.offset);
+  const offsetParam = `$${params.length}`;
+
+  const [rowsResult, countResult] = await Promise.all([
+    db.query<RawUserRow>(
+      `SELECT * FROM users ${whereClause}
+        ORDER BY display_name ASC
+        LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      params,
+    ),
+    db.query<{ count: string }>(
+      `SELECT count(*) AS count FROM users ${whereClause}`,
+      params.slice(0, params.length - 2),
+    ),
+  ]);
+
+  return {
+    rows: rowsResult.rows.map(mapRow),
+    total: Number(countResult.rows[0]?.count ?? '0'),
+  };
+}

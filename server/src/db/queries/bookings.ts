@@ -215,3 +215,163 @@ export async function deleteBookingSlotsForBooking(
 ): Promise<void> {
   await db.query(`DELETE FROM booking_slots WHERE booking_id = $1`, [bookingId]);
 }
+
+/** Same statement as deleteBookingSlotsForBooking, for the several bookings
+ * a member deactivation cancels at once. */
+export async function deleteBookingSlotsForBookings(
+  db: Queryable,
+  bookingIds: readonly string[],
+): Promise<void> {
+  if (bookingIds.length === 0) return;
+  await db.query(`DELETE FROM booking_slots WHERE booking_id = ANY($1)`, [
+    bookingIds,
+  ]);
+}
+
+/**
+ * Cancels every one of a member's active future bookings in one statement --
+ * data-model.md > Bulk Operations: "a handful of rows inside one
+ * transaction, not a bulk operation needing a batch entity." Returns the
+ * cancelled ids so the caller can free their slots in the same transaction.
+ */
+export async function cancelAllActiveBookingsForMember(
+  db: Queryable,
+  memberId: string,
+  cancelledBy: string,
+): Promise<readonly string[]> {
+  const result = await db.query<{ id: string }>(
+    `UPDATE bookings
+        SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2
+      WHERE member_id = $1 AND status = 'booked' AND ends_at > now()
+      RETURNING id`,
+    [memberId, cancelledBy],
+  );
+  return result.rows.map((row) => row.id);
+}
+
+/** Resolves "today" in studio-local time to a UTC instant range the same
+ * DST-safe way availability.ts's listResourcesWithWindows does, for the
+ * admin summary's "today's booking count". */
+export async function countBookingsStartingOnDate(
+  db: Queryable,
+  date: string,
+  studioTimeZone: string,
+): Promise<number> {
+  const result = await db.query<{ count: string }>(
+    `SELECT count(*) AS count
+       FROM bookings
+      WHERE status = 'booked'
+        AND starts_at >= ($1::date AT TIME ZONE $2)
+        AND starts_at < (($1::date + 1) AT TIME ZONE $2)`,
+    [date, studioTimeZone],
+  );
+  return Number(result.rows[0]?.count ?? '0');
+}
+
+export type AdminBookingStatusFilter = 'booked' | 'cancelled' | 'all';
+
+interface RawAdminBookingRow extends RawBookingRow {
+  resource_name: string;
+  member_display_name: string;
+  member_email: string;
+}
+
+export interface AdminBookingRow extends BookingRow {
+  readonly resourceName: string;
+  readonly memberDisplayName: string;
+  readonly memberEmail: string;
+}
+
+function mapAdminBookingRow(row: RawAdminBookingRow): AdminBookingRow {
+  return {
+    ...mapRow(row),
+    resourceName: row.resource_name,
+    memberDisplayName: row.member_display_name,
+    memberEmail: row.member_email,
+  };
+}
+
+export interface ListBookingsForAdminOptions {
+  readonly q: string;
+  readonly resourceId: string | null;
+  readonly status: AdminBookingStatusFilter;
+  /** Studio-local "YYYY-MM-DD", inclusive on both ends. */
+  readonly dateFrom: string | null;
+  readonly dateTo: string | null;
+  readonly studioTimeZone: string;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+export interface ListBookingsForAdminResult {
+  readonly rows: readonly AdminBookingRow[];
+  readonly total: number;
+}
+
+/**
+ * The admin's all-bookings list -- functional.md > Search & Reporting:
+ * "filters on date range, resource, and booking status; free-text on the
+ * booking member's name or email." Same dynamic-WHERE-builder pattern as
+ * resources.ts's listResources. Joins users for the member's identity,
+ * which a member-facing query never does (security.md > Authorization).
+ */
+export async function listBookingsForAdmin(
+  db: Queryable,
+  options: ListBookingsForAdminOptions,
+): Promise<ListBookingsForAdminResult> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options.q.trim()) {
+    params.push(`%${options.q.trim()}%`);
+    conditions.push(`(u.display_name ILIKE $${params.length} OR u.email ILIKE $${params.length})`);
+  }
+  if (options.resourceId) {
+    params.push(options.resourceId);
+    conditions.push(`b.resource_id = $${params.length}`);
+  }
+  if (options.status !== 'all') {
+    params.push(options.status);
+    conditions.push(`b.status = $${params.length}`);
+  }
+  if (options.dateFrom) {
+    params.push(options.dateFrom, options.studioTimeZone);
+    conditions.push(`b.starts_at >= ($${params.length - 1}::date AT TIME ZONE $${params.length})`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo, options.studioTimeZone);
+    conditions.push(
+      `b.starts_at < (($${params.length - 1}::date + 1) AT TIME ZONE $${params.length})`,
+    );
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const fromClause = `FROM bookings b
+       JOIN resources r ON r.id = b.resource_id
+       JOIN users u ON u.id = b.member_id
+       ${whereClause}`;
+
+  params.push(options.limit);
+  const limitParam = `$${params.length}`;
+  params.push(options.offset);
+  const offsetParam = `$${params.length}`;
+
+  const [rowsResult, countResult] = await Promise.all([
+    db.query<RawAdminBookingRow>(
+      `SELECT b.*, r.name AS resource_name, u.display_name AS member_display_name, u.email AS member_email
+         ${fromClause}
+        ORDER BY b.starts_at DESC
+        LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      params,
+    ),
+    db.query<{ count: string }>(
+      `SELECT count(*) AS count ${fromClause}`,
+      params.slice(0, params.length - 2),
+    ),
+  ]);
+
+  return {
+    rows: rowsResult.rows.map(mapAdminBookingRow),
+    total: Number(countResult.rows[0]?.count ?? '0'),
+  };
+}

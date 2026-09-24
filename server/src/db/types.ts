@@ -165,3 +165,50 @@ export function toBookingDto(row: BookingRow): BookingDto {
     status: row.status,
   };
 }
+
+/** The admin's view of a booking -- unlike BookingDto, this is entitled to
+ * carry the holder's identity (functional.md > User Roles: an admin "can
+ * view every booking in the studio with the booking member's name"). Never
+ * used to build a member-facing response. */
+export interface AdminBookingDto extends BookingDto {
+  readonly resourceName: string;
+  readonly memberDisplayName: string;
+  readonly memberEmail: string;
+}
+
+export function toAdminBookingDto(row: {
+  readonly id: string;
+  readonly resourceId: string;
+  readonly startsAt: Date;
+  readonly endsAt: Date;
+  readonly status: BookingStatus;
+  readonly resourceName: string;
+  readonly memberDisplayName: string;
+  readonly memberEmail: string;
+}): AdminBookingDto {
+  return {
+    id: row.id,
+    resourceId: row.resourceId,
+    startsAt: row.startsAt.toISOString(),
+    endsAt: row.endsAt.toISOString(),
+    status: row.status,
+    resourceName: row.resourceName,
+    memberDisplayName: row.memberDisplayName,
+    memberEmail: row.memberEmail,
+  };
+}
+
+/** Since when has this account been dormant -- a question only the admin
+ * member list answers (data-model.md > users). Never sent to a member. */
+export interface AdminMemberDto extends PublicUser {
+  readonly deactivatedAt: string | null;
+  readonly createdAt: string;
+}
+
+export function toAdminMemberDto(row: UserRow): AdminMemberDto {
+  return {
+    ...toPublicUser(row),
+    deactivatedAt: row.deactivatedAt ? row.deactivatedAt.toISOString() : null,
+    createdAt: row.createdAt.toISOString(),
+  };
+}

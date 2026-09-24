@@ -243,15 +243,15 @@ describe('POST /api/bookings', () => {
     });
 
     it('rejects a 4th active booking', async () => {
-      const { resourceId } = await bookableResourceFixture();
-
+      // The 3-active-bookings cap counts across ALL resources for the member
+      // (countActiveBookingsForMember has no resource_id filter), so each
+      // booking here uses its own fresh resource at the same near-term
+      // bookableSlot() offset -- no need for increasing offsets on a shared
+      // resource, which previously pushed later attempts toward midnight and
+      // made the test's outcome depend on what time it happened to run.
       for (let i = 0; i < 3; i += 1) {
-        const startsAt = nextSlotBoundary(
-          new Date(Date.now() + (40 + i * 60) * 60 * 1000),
-        ).toISOString();
-        const endsAt = new Date(
-          new Date(startsAt).getTime() + 30 * 60 * 1000,
-        ).toISOString();
+        const { resourceId } = await bookableResourceFixture();
+        const { startsAt, endsAt } = bookableSlot();
         const response = await member.agent
           .post('/api/bookings')
           .set('X-CSRF-Token', member.csrfToken)
@@ -259,20 +259,12 @@ describe('POST /api/bookings', () => {
         expect(response.status).toBe(201);
       }
 
-      // Continues the loop's own +60-minute cadence rather than a disconnected
-      // fixed offset -- a large fixed offset (e.g. +300 minutes) can round
-      // past the resource's same-day closeTime depending on what time this
-      // suite happens to run.
-      const fourthStart = nextSlotBoundary(
-        new Date(Date.now() + (40 + 3 * 60) * 60 * 1000),
-      ).toISOString();
-      const fourthEnd = new Date(
-        new Date(fourthStart).getTime() + 30 * 60 * 1000,
-      ).toISOString();
+      const { resourceId: fourthResourceId } = await bookableResourceFixture();
+      const { startsAt, endsAt } = bookableSlot();
       const response = await member.agent
         .post('/api/bookings')
         .set('X-CSRF-Token', member.csrfToken)
-        .send({ resourceId, startsAt: fourthStart, endsAt: fourthEnd });
+        .send({ resourceId: fourthResourceId, startsAt, endsAt });
 
       expect(response.status).toBe(409);
       expect(response.body.code).toBe('BOOKING_LIMIT_REACHED');
@@ -362,17 +354,22 @@ describe('POST /api/bookings', () => {
     });
 
     it("never lets a member's concurrent bookings exceed the 3-active cap", async () => {
-      const { resourceId } = await bookableResourceFixture();
       const member = await loginAsMember(app, pool, mailer, 'capracer@example.com');
+
+      // The cap is member-scoped, not resource-scoped
+      // (countActiveBookingsForMember has no resource_id filter), so each of
+      // the 4 bookings below uses its own fresh resource at the same
+      // near-term bookableSlot() offset -- that isolates the race to the cap
+      // alone (no shared resource_id+slot_start pair means booking_slots'
+      // constraint is never in play either) without the large, increasing
+      // offsets a shared resource previously needed to avoid colliding on
+      // the same slot, which made the test's outcome depend on what time it
+      // happened to run.
 
       // Bring the member to exactly 2 active bookings first (sequential, no race).
       for (let i = 0; i < 2; i += 1) {
-        const startsAt = nextSlotBoundary(
-          new Date(Date.now() + (40 + i * 60) * 60 * 1000),
-        ).toISOString();
-        const endsAt = new Date(
-          new Date(startsAt).getTime() + 30 * 60 * 1000,
-        ).toISOString();
+        const { resourceId } = await bookableResourceFixture();
+        const { startsAt, endsAt } = bookableSlot();
         const response = await member.agent
           .post('/api/bookings')
           .set('X-CSRF-Token', member.csrfToken)
@@ -380,30 +377,21 @@ describe('POST /api/bookings', () => {
         expect(response.status).toBe(201);
       }
 
-      // Two more, fired concurrently, on different slots (so the race is
-      // purely over the cap, not booking_slots' constraint).
-      const thirdStart = nextSlotBoundary(
-        new Date(Date.now() + 300 * 60 * 1000),
-      ).toISOString();
-      const thirdEnd = new Date(
-        new Date(thirdStart).getTime() + 30 * 60 * 1000,
-      ).toISOString();
-      const fourthStart = nextSlotBoundary(
-        new Date(Date.now() + 400 * 60 * 1000),
-      ).toISOString();
-      const fourthEnd = new Date(
-        new Date(fourthStart).getTime() + 30 * 60 * 1000,
-      ).toISOString();
+      // Two more, fired concurrently, each on its own resource.
+      const { resourceId: thirdResourceId } = await bookableResourceFixture();
+      const { resourceId: fourthResourceId } = await bookableResourceFixture();
+      const { startsAt: thirdStart, endsAt: thirdEnd } = bookableSlot();
+      const { startsAt: fourthStart, endsAt: fourthEnd } = bookableSlot();
 
       const [thirdResponse, fourthResponse] = await Promise.all([
         member.agent
           .post('/api/bookings')
           .set('X-CSRF-Token', member.csrfToken)
-          .send({ resourceId, startsAt: thirdStart, endsAt: thirdEnd }),
+          .send({ resourceId: thirdResourceId, startsAt: thirdStart, endsAt: thirdEnd }),
         member.agent
           .post('/api/bookings')
           .set('X-CSRF-Token', member.csrfToken)
-          .send({ resourceId, startsAt: fourthStart, endsAt: fourthEnd }),
+          .send({ resourceId: fourthResourceId, startsAt: fourthStart, endsAt: fourthEnd }),
       ]);
 
       const statuses = [thirdResponse.status, fourthResponse.status].sort();

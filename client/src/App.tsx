@@ -12,8 +12,11 @@ import { ResetPasswordPage } from './features/auth/pages/ResetPasswordPage.js';
 import { BrowsePage } from './features/availability/BrowsePage.js';
 import { MyBookingsPage } from './features/bookings/MyBookingsPage.js';
 import { AdminLayout } from './features/admin/AdminLayout.js';
+import { SummaryPage } from './features/admin/SummaryPage.js';
 import { ResourceTypesPage } from './features/admin-resource-types/ResourceTypesPage.js';
 import { ResourcesPage } from './features/admin-resources/ResourcesPage.js';
+import { BookingsPage as AdminBookingsPage } from './features/admin-bookings/BookingsPage.js';
+import { MembersPage } from './features/admin-members/MembersPage.js';
 import { ToastProvider } from './components/ui/Toast.js';
 
 // staleTime: 0 by default for anything not explicitly configured otherwise --
@@ -46,7 +49,9 @@ export function App(): React.JSX.Element {
 
               <Route element={<RequireAdmin />}>
                 <Route path="/admin" element={<AdminLayout />}>
-                  <Route index element={<Navigate to="resources" replace />} />
+                  <Route index element={<SummaryPage />} />
+                  <Route path="bookings" element={<AdminBookingsPage />} />
+                  <Route path="members" element={<MembersPage />} />
                   <Route path="resources" element={<ResourcesPage />} />
                   <Route path="resource-types" element={<ResourceTypesPage />} />
                 </Route>
