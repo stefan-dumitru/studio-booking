@@ -1,28 +1,7 @@
+import { apiFetch } from '../../lib/apiClient.js';
 import type { PublicUser } from './types.js';
 
-/**
- * Mirrors server/src/errors.ts's AppError shape -- the stable {code, message}
- * (and optional problems[]) convention from ui-guidelines.md > Feedback &
- * Error States, so a component can switch on `code` without parsing text.
- */
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly problems?: readonly string[];
-
-  constructor(
-    status: number,
-    code: string,
-    message: string,
-    problems?: readonly string[],
-  ) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.code = code;
-    this.problems = problems;
-  }
-}
+export { ApiError } from '../../lib/apiClient.js';
 
 interface SessionResponse {
   readonly user: PublicUser;
@@ -32,43 +11,6 @@ interface SessionResponse {
 interface MeResponse {
   readonly user: PublicUser;
   readonly csrfToken: string;
-}
-
-async function apiFetch<T>(
-  path: string,
-  init: RequestInit & { csrfToken?: string } = {},
-): Promise<T> {
-  const { csrfToken, ...rest } = init;
-  const headers = new Headers(rest.headers);
-  if (rest.body) headers.set('Content-Type', 'application/json');
-  if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
-
-  // Same-origin because the Vite dev proxy and the production build both
-  // serve the client and API from one origin -- no cross-site credentialed
-  // requests exist in this app (client/vite.config.ts).
-  const response = await fetch(`/api${path}`, {
-    ...rest,
-    headers,
-    credentials: 'same-origin',
-  });
-
-  const body: unknown = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    const errorBody = body as {
-      code?: string;
-      message?: string;
-      problems?: readonly string[];
-    } | null;
-    throw new ApiError(
-      response.status,
-      errorBody?.code ?? 'UNKNOWN',
-      errorBody?.message ?? 'Something went wrong.',
-      errorBody?.problems,
-    );
-  }
-
-  return body as T;
 }
 
 export function register(input: {

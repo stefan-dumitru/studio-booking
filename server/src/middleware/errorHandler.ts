@@ -12,11 +12,12 @@ import { AppError } from '../errors.js';
  */
 export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
   if (error instanceof AppError) {
-    const body: { code: string; message: string; problems?: readonly string[] } = {
+    const body: Record<string, unknown> = {
       code: error.code,
       message: error.message,
     };
-    if (error.problems) body.problems = error.problems;
+    if (error.problems) body['problems'] = error.problems;
+    if (error.detail) Object.assign(body, error.detail);
     res.status(error.status).json(body);
     return;
   }

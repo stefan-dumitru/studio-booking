@@ -18,8 +18,21 @@ export function issueCsrfToken(): string {
   return randomBytes(32).toString('hex');
 }
 
-/** Applied after requireAuth on every mutating (non-GET) authenticated route. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Skips safe (non-mutating) methods automatically, so this can be folded
+ * into requireVerified/requireAdmin themselves (middleware/auth.ts) rather
+ * than requiring every future mutating route to remember to add it -- a
+ * mutating admin route that forgot this check is exactly the bug that
+ * shipped once already and got caught by adminResourceTypes.test.ts.
+ */
 export const requireCsrf: RequestHandler = (req, res, next) => {
+  if (SAFE_METHODS.has(req.method)) {
+    next();
+    return;
+  }
+
   const expected = req.session.csrfToken;
   const provided = req.get(CSRF_HEADER);
 

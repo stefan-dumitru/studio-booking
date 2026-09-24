@@ -57,3 +57,77 @@ export interface EmailTokenRow {
   readonly usedAt: Date | null;
   readonly createdAt: Date;
 }
+
+export interface ResourceTypeRow {
+  readonly id: string;
+  readonly name: string;
+  readonly sortOrder: number;
+  readonly archivedAt: Date | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export interface ResourceTypeDto {
+  readonly id: string;
+  readonly name: string;
+  readonly sortOrder: number;
+  readonly archivedAt: string | null;
+}
+
+export function toResourceTypeDto(row: ResourceTypeRow): ResourceTypeDto {
+  return {
+    id: row.id,
+    name: row.name,
+    sortOrder: row.sortOrder,
+    archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+  };
+}
+
+export interface ResourceRow {
+  readonly id: string;
+  readonly name: string;
+  readonly typeId: string;
+  readonly description: string;
+  readonly capacity: number;
+  /** Studio-local wall clock, "HH:MM:SS" as Postgres returns a TIME column. */
+  readonly openTime: string;
+  readonly closeTime: string;
+  readonly archivedAt: Date | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export interface ResourceDto {
+  readonly id: string;
+  readonly name: string;
+  readonly typeId: string;
+  readonly description: string;
+  readonly capacity: number;
+  readonly openTime: string;
+  readonly closeTime: string;
+  readonly archivedAt: string | null;
+}
+
+export function toResourceDto(row: ResourceRow): ResourceDto {
+  return {
+    id: row.id,
+    name: row.name,
+    typeId: row.typeId,
+    description: row.description,
+    capacity: row.capacity,
+    // Trims Postgres's ":00" seconds so the client gets back exactly the
+    // "HH:MM" shape its <input type="time"> sent.
+    openTime: row.openTime.slice(0, 5),
+    closeTime: row.closeTime.slice(0, 5),
+    archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
+  };
+}
+
+/** A booking conflicting with an archive or an hours edit -- what the admin
+ * is shown so they can act on it (functional.md > Archive/Edit a resource). */
+export interface ConflictingBookingDto {
+  readonly bookingId: string;
+  readonly startsAt: string;
+  readonly endsAt: string;
+  readonly memberDisplayName: string;
+}

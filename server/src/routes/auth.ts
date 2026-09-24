@@ -17,7 +17,7 @@ import {
   validateRegisterBody,
   validateResetPasswordBody,
   validateTokenBody,
-} from '../validation.js';
+} from '../validation/auth.js';
 import { toPublicUser } from '../db/types.js';
 
 const GENERIC_ACCOUNT_MESSAGE =

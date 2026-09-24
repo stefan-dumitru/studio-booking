@@ -11,13 +11,21 @@ export type AuditAction =
   | 'logout'
   | 'password.reset_requested'
   | 'password.reset_completed'
-  | 'email.verified';
+  | 'email.verified'
+  | 'resource_type.create'
+  | 'resource_type.update'
+  | 'resource_type.archive'
+  | 'resource_type.unarchive'
+  | 'resource.create'
+  | 'resource.update'
+  | 'resource.archive'
+  | 'resource.unarchive';
 
 export interface AuditLogInput {
   readonly actorId?: string | null;
   readonly actorEmailAttempted?: string | null;
   readonly action: AuditAction;
-  readonly targetType?: 'user' | '';
+  readonly targetType?: 'user' | 'resource' | 'resource_type' | '';
   readonly targetId?: string | null;
   readonly detail?: Record<string, unknown>;
   readonly ip?: string | null;

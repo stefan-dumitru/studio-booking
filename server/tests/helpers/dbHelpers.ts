@@ -53,6 +53,35 @@ export async function sessionCountForUserId(
   return (result.rows[0] as { count: number } | undefined)?.count ?? 0;
 }
 
+export interface BookingFixtureInput {
+  readonly resourceId: string;
+  readonly memberId: string;
+  readonly startsAt: string;
+  readonly endsAt: string;
+}
+
+/**
+ * Inserts a booking directly, bypassing the (not-yet-built, Phase 3) booking
+ * API -- this is how the archive-block and stranded-bookings tests reach a
+ * state the current API can't produce on its own, same pattern as
+ * bookingSlots.test.ts uses for the schema-level tests.
+ */
+export async function insertBookingFixture(
+  pool: Pool,
+  input: BookingFixtureInput,
+): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO bookings (resource_id, member_id, starts_at, ends_at)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [input.resourceId, input.memberId, input.startsAt, input.endsAt],
+  );
+  const id = result.rows[0]?.id;
+  if (!id) {
+    throw new Error('insertBookingFixture: INSERT ... RETURNING produced no row');
+  }
+  return id;
+}
+
 /** Extracts the token= query-string value from a mailed link (the dev mailer
  * logs it, tests read it from the captured MailMessage.text instead). */
 export function extractTokenFromLink(text: string): string {

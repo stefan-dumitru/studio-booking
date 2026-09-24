@@ -1,39 +1,5 @@
 import { checkPassword } from '@studio/shared';
-import { AppError } from './errors.js';
-
-/**
- * Hand-written request-body validation, same "collect every problem, throw
- * once" shape as config.ts's ConfigErrors. A schema library (zod) is worth
- * discussing once Phase 2's admin CRUD bodies get larger than a handful of
- * fields -- these auth bodies don't clear that bar yet.
- */
-class ValidationErrors {
-  private readonly problems: string[] = [];
-
-  add(field: string, problem: string): void {
-    this.problems.push(`${field} ${problem}`);
-  }
-
-  throwIfAny(): void {
-    if (this.problems.length === 0) return;
-    throw new AppError(
-      400,
-      'VALIDATION_ERROR',
-      this.problems.join('; '),
-      this.problems,
-    );
-  }
-}
-
-// A pragmatic shape check, not full RFC 5322 validation -- the database's own
-// CHECK (position('@' IN email) > 1) is the actual backstop.
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function readString(body: unknown, field: string): string {
-  if (typeof body !== 'object' || body === null) return '';
-  const value = (body as Record<string, unknown>)[field];
-  return typeof value === 'string' ? value : '';
-}
+import { EMAIL_PATTERN, ValidationErrors, readString } from './shared.js';
 
 export interface RegisterBody {
   readonly email: string;
